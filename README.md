@@ -5,8 +5,10 @@ This project is using linux kernel legacy gpio to control reset and boot mode of
 ## Setup
 
 ### Device tree 
+
 In order to run this module, device tree must have node name **gpio-boot-reset**
 The driver will parse flowing propreties of **gpio-boot-reset**'s child node
+
 - **reset**: propreties that point to the that connect to reset pin of mcu (*mandatory*)
 - **boot**: propreties that point to gpio that connect to boot pin of mcu (*mandatory*)
 - **reset-time**: time of each reset pluse, default: 25 (unit: **us**) (*optional*)
@@ -15,7 +17,8 @@ The driver will parse flowing propreties of **gpio-boot-reset**'s child node
 - **boot-active-low**: boolean, determine boot gpio pin is active low (*optional*)
 
 __Example__:
-```
+
+```device tree
 gpio-boot-reset{
     compatible = "gpio-boot-reset";
     status = "okay";
@@ -34,12 +37,12 @@ gpio-boot-reset{
             reset-time = <20>;
             boot-time = <3000>;
     };
-    
 };
 ```
 
 example's  external pinctrl-0
-```
+
+```device tree
 reset_pin { 
     qcom,pins = <&gp 95>, <&gp 17>, <&gp 16>, <&gp 93> ;
 
@@ -54,26 +57,28 @@ reset_pin {
 ```
 
 ## Reset partern  
+
 This module only support 1 reset and boot partern only:
+
 - Reset: reset high -> wait for *reset-time* -> reset low
 - Boot: boot high -> reset high -> wair for *reset-time* > reset low -> wait for *boot-time* -> boot low
-
 
 ## Running
 
 After install module into kernel, there will be 1 file attribute for each child node **/sys/class/gpio_boot_reset/*/mode**
 To reset MCU use
-```
+
+```sh
 echo -n "normal" > /sys/class/gpio_boot_reset/{child_node_name}/mode
 ```
 
 To enter bootloader mode
-```
+
+```sh
 echo -n "prog" > /sys/class/gpio_boot_reset/{child_node_name}/mode
 ```
 
 With example device tree above, we will have 2 folder, which coresponse to 2 child node in device tree: **/sys/class/gpio_boot_reset/stm32f042c4/mode** and **/sys/class/gpio_boot_reset/nfc/mode**
-
 
 ## License
 
