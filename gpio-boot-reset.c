@@ -75,24 +75,24 @@ static ssize_t mode_store(struct device *dev, struct device_attribute *attr, con
     if (strcmp(buff,"prog") == 0)
     {
        mutex_lock(&data->lock);
-       gpio_direction_output(data->reset.gpio, 1 ^ data->reset.active_low);
-       gpio_direction_output(data->boot.gpio, 1 ^ data->boot.active_low);
+       gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low);
+       gpio_set_value(data->boot.gpio, 1 ^ data->boot.active_low);
 
        delay_time(data->reset_time);
 
-       gpio_direction_output(data->reset.gpio, 0 ^ data->reset.active_low);
+       gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
        delay_time(data->boot_time);
-       gpio_direction_output(data->boot.gpio, 0 ^ data->boot.active_low);
+       gpio_set_value(data->boot.gpio, 0 ^ data->boot.active_low);
        mutex_unlock(&data->lock);
     } 
     else if (strcmp(buff,"normal") == 0)
     {
        mutex_lock(&data->lock);
-       gpio_direction_output(data->reset.gpio, 1 ^ data->reset.active_low); 
+       gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low); 
 
        delay_time(data->reset_time);
 
-       gpio_direction_output(data->reset.gpio, 0 ^ data->reset.active_low);
+       gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
        mutex_unlock(&data->lock);
     }
     else PINFO ("mode input note valid, please enter \"prog\" or \"normal\" (without quote)\n");
@@ -154,7 +154,6 @@ static int driver_probe (struct platform_device *pdev)
             device->reset_time = temp2;
         else
             device->reset_time = DEFAULT_RESET_TIME;
-        //PINFO("temp %d\n", (int)temp);
 
         temp = of_property_read_u32(child, "boot-time", &temp2);
         
@@ -162,8 +161,6 @@ static int driver_probe (struct platform_device *pdev)
             device->boot_time = temp2;
         else
             device->boot_time = DEFAULT_BOOT_TIME;
-        //PINFO("temp %d\n", (int)temp);
-        PINFO("device %s have reset_time is:%d, boot_time is: %d\n", device->name, device->reset_time, device->boot_time);
 
         device->dev = device_create(data->dev_class, &pdev->dev, 0, device, "%s", device->name);
         if (IS_ERR(device->dev))
@@ -189,8 +186,6 @@ static int driver_probe (struct platform_device *pdev)
             goto error_boot_gpio;
         } 
 
-        PINFO ("reset number:%d, boot pin number: %d\n", device->reset.gpio, device->boot.gpio);
-
         // request gpio and init
         if (!gpio_is_valid(device->reset.gpio))
         {
@@ -207,6 +202,14 @@ static int driver_probe (struct platform_device *pdev)
             goto error_gpio_init;
         }
         else devm_gpio_request_one(device->dev, device->boot.gpio, GPIOF_OUT_INIT_LOW, "boot");
+
+	    PINFO("device %s configuration : \n", device->name);
+        PINFO("\treset_time: %d\n", device->reset_time);
+        PINFO("\tboot_time: %d\n", device->boot_time);
+        PINFO("\trset-active-low: %s\n", device->reset.active_low ? "true" : "false");
+        PINFO("\tboot-active-low: %s\n", device->boot.active_low ? "true" : "false");
+        PINFO("\treset_gpio_number: %d\n", device->reset.gpio);
+        PINFO("\tboot_gpio_number: %d\n", device->boot.gpio);
 
         continue;
 
