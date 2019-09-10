@@ -13,10 +13,11 @@
 #include <linux/mutex.h>
 #include <linux/string.h>
 #include <linux/of_gpio.h>
+#include <linux/kthread.h>
+#include <linux/kdev_t.h>
 
 #define DRIVER_NAME "gpio-boot-reset"
 #define FIRST_MINOR 0
-#define BUFF_SIZE 100
 #define DEFAULT_RESET_TIME 25
 #define DEFAULT_BOOT_TIME 10
 
@@ -37,6 +38,7 @@ typedef struct dev_private_data {
     gpio_data_t boot;
     int reset_time;
     int boot_time;
+    struct task_struct* startup_task;
 } dev_private_data_t;
 
 typedef struct platform_private_data{
@@ -45,6 +47,22 @@ typedef struct platform_private_data{
     dev_private_data_t devices [];
 } platform_private_data_t;
 
+dev_t dev_num ;
+int dev_num_major = 0;
+
+int reset_task(void* );
+void reset_dev(dev_private_data_t *);
+void boot_dev(dev_private_data_t *);
+void delay_time (int);
+
+int reset_task(void* param)
+{
+    dev_private_data_t *data = (dev_private_data_t *)param;
+
+    reset_dev(data);
+    PINFO("%s reseted\r\n",data->name);
+    return 0;
+}
 
 static inline int sizeof_platform_data(int num_reset)
 {
@@ -52,9 +70,30 @@ static inline int sizeof_platform_data(int num_reset)
 		(sizeof(dev_private_data_t) * num_reset);
 }
 
-/***********************************/
-/***** define device attribute *****/
-/***********************************/
+void reset_dev(dev_private_data_t *data)
+{
+    mutex_lock(&data->lock);
+    gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low); 
+
+    delay_time(data->reset_time);
+
+    gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
+    mutex_unlock(&data->lock);
+}
+
+void boot_dev(dev_private_data_t *data)
+{
+    mutex_lock(&data->lock);
+    gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low);
+    gpio_set_value(data->boot.gpio, 1 ^ data->boot.active_low);
+
+    delay_time(data->reset_time);
+
+    gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
+    delay_time(data->boot_time);
+    gpio_set_value(data->boot.gpio, 0 ^ data->boot.active_low);
+    mutex_unlock(&data->lock);
+}
 
 void delay_time (int time)
 {
@@ -63,37 +102,26 @@ void delay_time (int time)
     else if (time <= 15000)
         usleep_range(time, time + 10);
     else 
-        msleep(time);
+        msleep(time/1000);
 }
+
+/***********************************/
+/***** define device attribute *****/
+/***********************************/
 
 static ssize_t mode_store(struct device *dev, struct device_attribute *attr, const char *buff, size_t len)
 {
-    //int temp;
     dev_private_data_t *data = dev_get_drvdata(dev);
-    PINFO ("inside mode_store function, input is \"%s\",size %d byte\n", buff, len);
+    if (!data)
+        PERR ("Can't get dev private data: %d", data);
 
     if (strcmp(buff,"prog") == 0)
     {
-       mutex_lock(&data->lock);
-       gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low);
-       gpio_set_value(data->boot.gpio, 1 ^ data->boot.active_low);
-
-       delay_time(data->reset_time);
-
-       gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
-       delay_time(data->boot_time);
-       gpio_set_value(data->boot.gpio, 0 ^ data->boot.active_low);
-       mutex_unlock(&data->lock);
+       boot_dev(data);
     } 
     else if (strcmp(buff,"normal") == 0)
     {
-       mutex_lock(&data->lock);
-       gpio_set_value(data->reset.gpio, 1 ^ data->reset.active_low); 
-
-       delay_time(data->reset_time);
-
-       gpio_set_value(data->reset.gpio, 0 ^ data->reset.active_low);
-       mutex_unlock(&data->lock);
+       reset_dev(data);
     }
     else PINFO ("mode input note valid, please enter \"prog\" or \"normal\" (without quote)\n");
     
@@ -108,10 +136,9 @@ static struct device_attribute dev_class_attr[] = {
 /***************************/
 /*****module init + exit****/
 /***************************/
-
 static int driver_probe (struct platform_device *pdev)
 {
-    int num_reset;
+    int num_reset, res;
     struct device_node *np = pdev->dev.of_node;
     struct device_node *child ;
     platform_private_data_t *data;
@@ -119,15 +146,23 @@ static int driver_probe (struct platform_device *pdev)
     PINFO ("driver module init\n");
     PINFO ("node name %s\n",pdev->dev.of_node->name );
 
-    // create private data
     num_reset = of_get_child_count(np);
     if (!num_reset)
 		return -ENODEV;
 
+    // register device
+    res = alloc_chrdev_region(&dev_num, FIRST_MINOR, num_reset, DRIVER_NAME);
+     if (res){
+        PERR("Can't register device, error code: %d \n", res); 
+        return -1;
+    }
+    dev_num_major = MAJOR(dev_num);
+
+    // create private data
     data = (platform_private_data_t*)kcalloc(1, sizeof_platform_data(num_reset), GFP_KERNEL);
     data->num_reset = 0;
 
-    // // create class 
+    // create class 
     data->dev_class = class_create(THIS_MODULE, DRIVER_NAME);
     if (IS_ERR(data->dev_class))
     {
@@ -137,10 +172,10 @@ static int driver_probe (struct platform_device *pdev)
     }
     data->dev_class->dev_attrs = dev_class_attr;
     
+    num_reset = 0;
     for_each_child_of_node(np, child) {
-        dev_private_data_t *device = &data->devices[data->num_reset++];
-        u32 temp2;
-        int temp;
+        dev_private_data_t *device = &data->devices[num_reset];
+        u32 temp;
         mutex_init(&device->lock);
         
 		device->name = of_get_property(child, "label", NULL) ? : child->name;
@@ -149,20 +184,21 @@ static int driver_probe (struct platform_device *pdev)
         device->reset.active_low = of_property_read_bool(child,"reset-active-low");
         device->boot.active_low = of_property_read_bool(child,"boot-active-low");
 
-        temp = of_property_read_u32(child, "reset-time", &temp2);
-        if (!temp)
-            device->reset_time = temp2;
+        res = of_property_read_u32(child, "reset-time", &temp);
+        if (!res)
+            device->reset_time = temp;
         else
             device->reset_time = DEFAULT_RESET_TIME;
 
-        temp = of_property_read_u32(child, "boot-time", &temp2);
+        res = of_property_read_u32(child, "boot-time", &temp);
         
-        if (!temp)
-            device->boot_time = temp2;
+        if (!res)
+            device->boot_time = temp;
         else
             device->boot_time = DEFAULT_BOOT_TIME;
 
         device->dev = device_create(data->dev_class, &pdev->dev, 0, device, "%s", device->name);
+
         if (IS_ERR(device->dev))
         {
             PERR("device for %s create fall, error code: %d\n", device->name, (int)device->dev);
@@ -210,43 +246,57 @@ static int driver_probe (struct platform_device *pdev)
         PINFO("\tboot-active-low: %s\n", device->boot.active_low ? "true" : "false");
         PINFO("\treset_gpio_number: %d\n", device->reset.gpio);
         PINFO("\tboot_gpio_number: %d\n", device->boot.gpio);
+        ++num_reset;
 
+        device->startup_task = (struct task_struct*)kcalloc(1, sizeof(struct task_struct), GFP_KERNEL);
+        device->startup_task = kthread_run(reset_task, device, device->name);
+        if (!device->startup_task)
+            PINFO("%s reset onstaup fail\r\n", device->name);
         continue;
 
         error_gpio_init:
-            gpio_free(device->reset.gpio);
+            gpio_free(device->boot.gpio);
         error_boot_gpio:
             gpio_free(device->reset.gpio);
         error_reset_gpio:
-            device_unregister(device->dev);
+            device_destroy(data->dev_class, dev_num);
         error_device:
             continue;
     }
+    if (num_reset == 0)
+    {
+        class_destroy(data->dev_class);
+        kfree(data);
 
+        return -1;
+    }
+    data->num_reset = num_reset;
+    
     platform_set_drvdata(pdev, data);
 
     return 0;
 
     //error handle
 error_class:
-//      unregister_chrdev_region(my_device_num, FIRST_MINOR); 
-// error:
     return -1;
 
 }
 
 static int driver_remove(struct platform_device *pdev)
 {
+    int i;
     platform_private_data_t *data = platform_get_drvdata(pdev);
-    // int i = 0;
+    if (!data)
+        PERR ("Can't get dev private data: %d", data);
     PINFO("driver module remove from kernel\n");
-    
-    // for (i = 0 ; i < data->num_reset; ++i)
-    // {
-    //     gpio_free(data->devices[i].boot.gpio);
-    //     gpio_free(data->devices[i].reset.gpio);
-    //     device_unregister(data->devices[i].dev);
-    // }
+
+    for (i = 0 ; i < data->num_reset; ++i)
+    {
+        gpio_free(data->devices[i].boot.gpio);
+        gpio_free(data->devices[i].reset.gpio);
+        dev_num = MKDEV(dev_num_major, FIRST_MINOR + i);
+        device_destroy(data->dev_class, dev_num);
+    }
 
     class_destroy(data->dev_class);
     kfree(data);
