@@ -63,7 +63,7 @@ void delay_time (int time)
     else if (time <= 15000)
         usleep_range(time, time + 10);
     else 
-        msleep(time);
+        msleep(time/1000);
 }
 
 static ssize_t mode_store(struct device *dev, struct device_attribute *attr, const char *buff, size_t len)
@@ -121,11 +121,11 @@ static int driver_probe (struct platform_device *pdev)
     PINFO ("driver module init\n");
     PINFO ("node name %s\n",pdev->dev.of_node->name );
 
-    // create private data
     num_reset = of_get_child_count(np);
     if (!num_reset)
 		return -ENODEV;
 
+    // create private data
     data = (platform_private_data_t*)kcalloc(1, sizeof_platform_data(num_reset), GFP_KERNEL);
     data->num_reset = 0;
 
@@ -139,7 +139,7 @@ static int driver_probe (struct platform_device *pdev)
     }
     
     for_each_child_of_node(np, child) {
-        dev_private_data_t *device = &data->devices[data->num_reset++];
+        dev_private_data_t *device = &data->devices[num_reset];
         u32 temp2;
         int temp;
         mutex_init(&device->lock);
@@ -211,7 +211,7 @@ static int driver_probe (struct platform_device *pdev)
         PINFO("\tboot-active-low: %s\n", device->boot.active_low ? "true" : "false");
         PINFO("\treset_gpio_number: %d\n", device->reset.gpio);
         PINFO("\tboot_gpio_number: %d\n", device->boot.gpio);
-
+        ++num_reset;
         continue;
 
         error_gpio_init:
@@ -223,15 +223,19 @@ static int driver_probe (struct platform_device *pdev)
         error_device:
             continue;
     }
+    if (num_reset == 0)
+    {
+        class_destroy(data->dev_class);
 
+        return -1;
+    }
+    data->num_reset = num_reset;
     platform_set_drvdata(pdev, data);
 
     return 0;
 
     //error handle
 error_class:
-//      unregister_chrdev_region(my_device_num, FIRST_MINOR); 
-// error:
     return -1;
 
 }
@@ -239,15 +243,7 @@ error_class:
 static int driver_remove(struct platform_device *pdev)
 {
     platform_private_data_t *data = platform_get_drvdata(pdev);
-    // int i = 0;
     PINFO("driver module remove from kernel\n");
-    
-    // for (i = 0 ; i < data->num_reset; ++i)
-    // {
-    //     gpio_free(data->devices[i].boot.gpio);
-    //     gpio_free(data->devices[i].reset.gpio);
-    //     device_unregister(data->devices[i].dev);
-    // }
 
     class_destroy(data->dev_class);
     kfree(data);
