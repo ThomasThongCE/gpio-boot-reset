@@ -99,11 +99,13 @@ static ssize_t mode_store(struct device *dev, struct device_attribute *attr, con
     
     return len;
 } 
+static DEVICE_ATTR_WO(mode);
 
-static struct device_attribute dev_class_attr[] = {
-    __ATTR(mode,0222,NULL,mode_store),
-    __ATTR_NULL,
+static struct attribute *device_attrs[] = {
+	    &dev_attr_mode.attr,
+	    NULL
 };
+ATTRIBUTE_GROUPS(device);
 
 /***************************/
 /*****module init + exit****/
@@ -135,7 +137,6 @@ static int driver_probe (struct platform_device *pdev)
 
         goto error_class;
     }
-    data->dev_class->dev_attrs = dev_class_attr;
     
     for_each_child_of_node(np, child) {
         dev_private_data_t *device = &data->devices[data->num_reset++];
@@ -162,7 +163,7 @@ static int driver_probe (struct platform_device *pdev)
         else
             device->boot_time = DEFAULT_BOOT_TIME;
 
-        device->dev = device_create(data->dev_class, &pdev->dev, 0, device, "%s", device->name);
+        device->dev = device_create_with_groups(data->dev_class, &pdev->dev, 0, device, device_groups, "%s", device->name);
         if (IS_ERR(device->dev))
         {
             PERR("device for %s create fall, error code: %d\n", device->name, (int)device->dev);
