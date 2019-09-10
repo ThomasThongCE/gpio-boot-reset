@@ -1,6 +1,6 @@
 # GPIO boot reset
 
-This project is using linux kernel legacy gpio to control reset and boot mode of any mcu.Tested on linux kernel version 3.10.49
+This project is using linux kernel legacy gpio to control reset and boot mode of any mcu.Tested on linux kernel version 3.18.71 and 4.15
 
 ## Setup
 
@@ -62,6 +62,20 @@ This module only support 1 reset and boot partern only:
 
 - Reset: reset high -> wait for *reset-time* -> reset low
 - Boot: boot high -> reset high -> wair for *reset-time* > reset low -> wait for *boot-time* -> boot low
+
+## Build
+
+Provide your target kernel using KERNEL_SRC (default is host kernel directory **/lib/modules/$(shell uname -r )/build**) variable using following code
+
+```
+make KERNEL_SRC=/PATH/TO/YOUR/KERNEL/SOURCE
+```
+
+To clean unnecessary file
+
+```
+make clean
+```
 
 ## Running
 
